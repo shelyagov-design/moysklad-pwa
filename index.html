@@ -1,145 +1,254 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>МойСклад PWA</title>
-    <style>
-        body { font-family: sans-serif; padding: 16px; background: #f4f4f4; }
-        .card { background: white; padding: 16px; border-radius: 12px; margin-bottom: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
-        input { width: 100%; padding: 12px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 8px; }
-        button { width: 100%; padding: 14px; background: #2d5016; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; }
-        button:disabled { background: #999; }
-        .item { padding: 10px 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }
-        .item:last-child { border-bottom: none; }
-        .qty { font-weight: bold; color: #2d5016; }
-        .error { color: #c0392b; margin-top: 12px; font-weight: bold; }
-        .hidden { display: none; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>МойСклад PWA</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0; padding: 16px;
+    background: #f4f4f4;
+    color: #1a1a1a;
+    font-size: 16px;
+  }
+  .container { max-width: 600px; margin: 0 auto; }
+  h2 { color: #2d5016; margin-top: 0; }
+  .card {
+    background: white;
+    padding: 16px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  }
+  label { display: block; font-size: 14px; color: #555; margin-bottom: 6px; font-weight: 600; }
+  input {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #d0d8c8;
+    border-radius: 8px;
+    font-size: 16px;
+    outline: none;
+    margin-bottom: 10px;
+  }
+  input:focus { border-color: #2d5016; }
+  button {
+    width: 100%;
+    padding: 14px;
+    background: #2d5016;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  button:active { transform: scale(0.98); }
+  button:disabled { background: #999; cursor: not-allowed; }
+  button.secondary { background: #6b7c5e; margin-top: 8px; }
+  .item {
+    padding: 10px 0;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+  .item:last-child { border-bottom: none; }
+  .item .name { flex: 1; }
+  .item .qty { font-weight: 700; color: #2d5016; white-space: nowrap; }
+  .status {
+    padding: 12px;
+    border-radius: 8px;
+    margin-top: 10px;
+    font-size: 14px;
+  }
+  .status.error { background: #fde8e6; color: #7a1f15; border-left: 4px solid #c0392b; }
+  .status.loading { background: #fff3cd; color: #7a5c00; border-left: 4px solid #f39c12; }
+  .status.info { background: #eef4e9; color: #4a5540; border-left: 4px solid #6b7c5e; }
+  .hidden { display: none; }
+  .search {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #d0d8c8;
+    border-radius: 8px;
+    font-size: 16px;
+    margin-bottom: 12px;
+  }
+  .count { font-size: 13px; color: #777; margin-bottom: 10px; }
+</style>
 </head>
 <body>
 
-    <h2>📦 Остатки МойСклад</h2>
+<div class="container">
 
+  <h2>📦 Остатки МойСклад</h2>
+
+  <div class="card">
+    <label>Токен API МойСклад</label>
+    <input type="password" id="tokenInput" placeholder="Вставь токен сюда">
+    <button onclick="saveAndLoad()">Сохранить и загрузить остатки</button>
+    <button class="secondary" onclick="clearToken()">Забыть токен</button>
+  </div>
+
+  <div id="status" class="hidden"></div>
+
+  <div id="result" class="hidden">
     <div class="card">
-        <label>Токен API МойСклад</label>
-        <input type="password" id="tokenInput" placeholder="Вставь токен сюда">
-        <button onclick="saveAndLoad()">Сохранить и загрузить остатки</button>
+      <input type="text" id="searchInput" class="search" placeholder="🔍 Поиск по названию..." oninput="filterList()">
+      <div class="count" id="countInfo"></div>
+      <div id="list"></div>
     </div>
+  </div>
 
-    <div id="status" class="card hidden"></div>
-    <div id="result" class="card hidden">
-        <h3>Товары на складе</h3>
-        <div id="list"></div>
-    </div>
+</div>
 
 <script>
-    // Простейшая обёртка для хранения токена на телефоне (через localStorage)
-    // В будущем заменим на localForage, как в "Растворе"
-    function getToken() {
-        return localStorage.getItem('moysklad_token') || '';
+  // ================ НАСТРОЙКИ ================
+  const WORKER_URL = 'https://moysklad-proxy.shelyagov.workers.dev/';
+  const MOYSKLAD_API = 'https://api.moysklad.ru/api/remap/1.2/report/stock/all';
+
+  let allItems = [];
+
+  // ================ ХРАНЕНИЕ ТОКЕНА ================
+  function getToken() {
+    return localStorage.getItem('moysklad_token') || '';
+  }
+  function setToken(token) {
+    localStorage.setItem('moysklad_token', token);
+  }
+  function clearToken() {
+    localStorage.removeItem('moysklad_token');
+    document.getElementById('tokenInput').value = '';
+    document.getElementById('result').classList.add('hidden');
+    showStatus('Токен удалён', 'info');
+  }
+
+  // ================ ЗАГРУЗКА ДАННЫХ ================
+  async function loadStock() {
+    const token = getToken();
+    if (!token) {
+      showStatus('❌ Токен не сохранён. Введи его выше.', 'error');
+      return;
     }
 
-    function setToken(token) {
-        localStorage.setItem('moysklad_token', token);
+    showStatus('⏳ Запрашиваю остатки из МойСклад...', 'loading');
+
+    try {
+      // Формируем URL через прокси
+      const url = `${WORKER_URL}?url=${encodeURIComponent(MOYSKLAD_API)}`;
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept-Encoding': 'gzip'
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 200)}`);
+      }
+
+      const data = await response.json();
+      allItems = data.rows || [];
+
+      if (allItems.length === 0) {
+        showStatus('📦 Склад пуст или нет товаров.', 'info');
+        document.getElementById('result').classList.add('hidden');
+        return;
+      }
+
+      document.getElementById('result').classList.remove('hidden');
+      filterList();
+      showStatus('', '');
+
+    } catch (error) {
+      console.error(error);
+      showStatus(`❌ Ошибка: ${error.message}`, 'error');
+    }
+  }
+
+  // ================ ОТОБРАЖЕНИЕ ================
+  function filterList() {
+    const query = (document.getElementById('searchInput').value || '').toLowerCase().trim();
+    const filtered = query
+      ? allItems.filter(item => (item.name || '').toLowerCase().includes(query))
+      : allItems;
+
+    const listEl = document.getElementById('list');
+    const countEl = document.getElementById('countInfo');
+
+    countEl.textContent = query
+      ? `Найдено: ${filtered.length} из ${allItems.length}`
+      : `Всего позиций: ${allItems.length}`;
+
+    if (filtered.length === 0) {
+      listEl.innerHTML = '<p style="color:#777">Ничего не найдено</p>';
+      return;
     }
 
-    // Загрузка остатков
-    async function loadStock() {
-        const token = getToken();
-        if (!token) {
-            showStatus('❌ Токен не сохранён. Введи его выше и нажми кнопку.', true);
-            return;
-        }
+    const display = filtered.slice(0, 50);
+    listEl.innerHTML = display.map(item => {
+      const name = item.name || 'Без названия';
+      const qty = item.quantity || 0;
+      const uom = (item.uom && item.uom.name) || 'шт';
+      return `
+        <div class="item">
+          <span class="name">${escapeHtml(name)}</span>
+          <span class="qty">${qty} ${escapeHtml(uom)}</span>
+        </div>
+      `;
+    }).join('');
 
-        showStatus('⏳ Запрашиваю остатки из МойСклад...', false);
-
-        try {
-            // API МойСклад для отчета по остаткам
-            const url = 'https://api.moysklad.ru/api/remap/1.2/report/stock/all';
-
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Accept-Encoding': 'gzip'
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`Ошибка HTTP: ${response.status}. Проверь токен или права доступа.`);
-            }
-
-            const data = await response.json();
-            const rows = data.rows || [];
-
-            renderStock(rows);
-            showStatus('', false); // Скрыть статус
-
-        } catch (error) {
-            console.error(error);
-            showStatus(`❌ Ошибка: ${error.message}`, true);
-        }
+    if (filtered.length > 50) {
+      listEl.innerHTML += `<p style="color:#777; font-size:14px; margin-top:12px">…показаны первые 50. Уточни поиск.</p>`;
     }
+  }
 
-    // Отображение списка
-    function renderStock(items) {
-        const listEl = document.getElementById('list');
-        const resultEl = document.getElementById('result');
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
 
-        if (items.length === 0) {
-            listEl.innerHTML = '<p>Склад пуст или нет товаров.</p>';
-        } else {
-            // Показываем первые 20 позиций, чтобы не грузить экран
-            const displayItems = items.slice(0, 20);
-            listEl.innerHTML = displayItems.map(item => {
-                const name = item.name || 'Без названия';
-                const qty = item.quantity || 0;
-                const uom = item.uom?.name || 'шт';
-                return `
-                    <div class="item">
-                        <span>${name}</span>
-                        <span class="qty">${qty} ${uom}</span>
-                    </div>
-                `;
-            }).join('');
-
-            if (items.length > 20) {
-                listEl.innerHTML += `<p style="color:#777; font-size:14px; margin-top:12px">…и ещё ${items.length - 20} позиций</p>`;
-            }
-        }
-
-        resultEl.classList.remove('hidden');
+  function showStatus(text, type) {
+    const el = document.getElementById('status');
+    if (!text) {
+      el.classList.add('hidden');
+      return;
     }
+    el.className = 'status ' + (type || 'info');
+    el.textContent = text;
+    el.classList.remove('hidden');
+  }
 
-    function showStatus(text, isError) {
-        const statusEl = document.getElementById('status');
-        if (!text) {
-            statusEl.classList.add('hidden');
-            return;
-        }
-        statusEl.classList.remove('hidden');
-        statusEl.innerHTML = text;
-        statusEl.style.color = isError ? '#c0392b' : '#555';
+  // ================ СОХРАНЕНИЕ И ЗАГРУЗКА ================
+  function saveAndLoad() {
+    const input = document.getElementById('tokenInput');
+    const token = input.value.trim();
+    if (token) setToken(token);
+    loadStock();
+  }
+
+  // ================ СТАРТ ================
+  window.addEventListener('DOMContentLoaded', () => {
+    const saved = getToken();
+    if (saved) {
+      document.getElementById('tokenInput').value = saved;
     }
+  });
 
-    // Сохранение токена и загрузка
-    function saveAndLoad() {
-        const input = document.getElementById('tokenInput');
-        const token = input.value.trim();
-        if (token) {
-            setToken(token);
-        }
-        loadStock();
-    }
-
-    // При загрузке страницы — подставить сохранённый токен
-    window.addEventListener('DOMContentLoaded', () => {
-        const saved = getToken();
-        if (saved) {
-            document.getElementById('tokenInput').value = saved;
-        }
+  // Регистрация Service Worker (если добавишь sw.js позже)
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
     });
+  }
 </script>
 
 </body>
