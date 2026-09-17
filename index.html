@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>МойСклад PWA</title>
+    <style>
+        body { font-family: sans-serif; padding: 16px; background: #f4f4f4; }
+        .card { background: white; padding: 16px; border-radius: 12px; margin-bottom: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+        input { width: 100%; padding: 12px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 8px; }
+        button { width: 100%; padding: 14px; background: #2d5016; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; }
+        button:disabled { background: #999; }
+        .item { padding: 10px 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }
+        .item:last-child { border-bottom: none; }
+        .qty { font-weight: bold; color: #2d5016; }
+        .error { color: #c0392b; margin-top: 12px; font-weight: bold; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+    <h2>📦 Остатки МойСклад</h2>
+
+    <div class="card">
+        <label>Токен API МойСклад</label>
+        <input type="password" id="tokenInput" placeholder="Вставь токен сюда">
+        <button onclick="saveAndLoad()">Сохранить и загрузить остатки</button>
+    </div>
+
+    <div id="status" class="card hidden"></div>
+    <div id="result" class="card hidden">
+        <h3>Товары на складе</h3>
+        <div id="list"></div>
+    </div>
+
+<script>
+    // Простейшая обёртка для хранения токена на телефоне (через localStorage)
+    // В будущем заменим на localForage, как в "Растворе"
+    function getToken() {
+        return localStorage.getItem('moysklad_token') || '';
+    }
+
+    function setToken(token) {
+        localStorage.setItem('moysklad_token', token);
+    }
+
+    // Загрузка остатков
+    async function loadStock() {
+        const token = getToken();
+        if (!token) {
+            showStatus('❌ Токен не сохранён. Введи его выше и нажми кнопку.', true);
+            return;
+        }
+
+        showStatus('⏳ Запрашиваю остатки из МойСклад...', false);
+
+        try {
+            // API МойСклад для отчета по остаткам
+            const url = 'https://api.moysklad.ru/api/remap/1.2/report/stock/all';
+
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Accept-Encoding': 'gzip'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`Ошибка HTTP: ${response.status}. Проверь токен или права доступа.`);
+            }
+
+            const data = await response.json();
+            const rows = data.rows || [];
+
+            renderStock(rows);
+            showStatus('', false); // Скрыть статус
+
+        } catch (error) {
+            console.error(error);
+            showStatus(`❌ Ошибка: ${error.message}`, true);
+        }
+    }
+
+    // Отображение списка
+    function renderStock(items) {
+        const listEl = document.getElementById('list');
+        const resultEl = document.getElementById('result');
+
+        if (items.length === 0) {
+            listEl.innerHTML = '<p>Склад пуст или нет товаров.</p>';
+        } else {
+            // Показываем первые 20 позиций, чтобы не грузить экран
+            const displayItems = items.slice(0, 20);
+            listEl.innerHTML = displayItems.map(item => {
+                const name = item.name || 'Без названия';
+                const qty = item.quantity || 0;
+                const uom = item.uom?.name || 'шт';
+                return `
+                    <div class="item">
+                        <span>${name}</span>
+                        <span class="qty">${qty} ${uom}</span>
+                    </div>
+                `;
+            }).join('');
+
+            if (items.length > 20) {
+                listEl.innerHTML += `<p style="color:#777; font-size:14px; margin-top:12px">…и ещё ${items.length - 20} позиций</p>`;
+            }
+        }
+
+        resultEl.classList.remove('hidden');
+    }
+
+    function showStatus(text, isError) {
+        const statusEl = document.getElementById('status');
+        if (!text) {
+            statusEl.classList.add('hidden');
+            return;
+        }
+        statusEl.classList.remove('hidden');
+        statusEl.innerHTML = text;
+        statusEl.style.color = isError ? '#c0392b' : '#555';
+    }
+
+    // Сохранение токена и загрузка
+    function saveAndLoad() {
+        const input = document.getElementById('tokenInput');
+        const token = input.value.trim();
+        if (token) {
+            setToken(token);
+        }
+        loadStock();
+    }
+
+    // При загрузке страницы — подставить сохранённый токен
+    window.addEventListener('DOMContentLoaded', () => {
+        const saved = getToken();
+        if (saved) {
+            document.getElementById('tokenInput').value = saved;
+        }
+    });
+</script>
+
+</body>
+</html>
